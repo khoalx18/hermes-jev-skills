@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import re
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -250,9 +251,46 @@ def _unique(values: Iterable[str], banned: Iterable[str] = ()) -> List[str]:
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
+
+# The remote model these defaults were calibrated for scores on a different scale than the
+# local openJev build. Measured 22/09/2026 on this machine, benign vault passages came back
+# at injection 0.395-0.436 in one run and 0.745-0.820 in another, while hand-written
+# injections scored 0.419-0.427 -- inside the benign range. The local injection head cannot
+# gate, so on the local path the pattern screen stays the only block and this threshold sits
+# above anything the head produces; relevance keeps doing the ranking work it does well.
+LOCAL_INJECTION_THRESHOLD = 0.85
+LOCAL_RELEVANCE_THRESHOLD = 0.30
+REMOTE_INJECTION_THRESHOLD = 0.5
+REMOTE_RELEVANCE_THRESHOLD = 0.5
+
+
+def _using_local_engine() -> bool:
+    if os.environ.get("OPENJEV_LOCAL") == "1" or os.environ.get("JEV_LOCAL") == "1":
+        return True
+    return bool(getattr(client, "OPENJEV_USE_LOCAL", False))
+
+
+def _resolve_thresholds(
+    relevance: Optional[float], injection: Optional[float]
+) -> Tuple[float, float]:
+    """Fill in whichever threshold the caller left out, per engine."""
+    if relevance is not None and injection is not None:
+        return relevance, injection
+    if _using_local_engine():
+        default_relevance = float(os.environ.get("JEV_RELEVANCE_THRESHOLD") or LOCAL_RELEVANCE_THRESHOLD)
+        default_injection = float(os.environ.get("JEV_INJECTION_THRESHOLD") or LOCAL_INJECTION_THRESHOLD)
+    else:
+        default_relevance = float(os.environ.get("JEV_RELEVANCE_THRESHOLD") or REMOTE_RELEVANCE_THRESHOLD)
+        default_injection = float(os.environ.get("JEV_INJECTION_THRESHOLD") or REMOTE_INJECTION_THRESHOLD)
+    return (
+        default_relevance if relevance is None else relevance,
+        default_injection if injection is None else injection,
+    )
+
+
 def rerank(
-    query: str, candidates: Sequence[Mapping[str, Any]], *, top_k: int = 8, relevance_threshold: float = 0.5,
-    injection_threshold: float = 0.5, timeout: float = 5.0, transport: Optional[client.Transport] = None,
+    query: str, candidates: Sequence[Mapping[str, Any]], *, top_k: int = 8, relevance_threshold: Optional[float] = None,
+    injection_threshold: Optional[float] = None, timeout: float = 5.0, transport: Optional[client.Transport] = None,
     today: Optional[datetime.date] = None,
 ) -> Dict[str, Any]:
     """``candidates`` are ``{"id": ..., "text": ...}``. Order in is the baseline order.
@@ -262,6 +300,7 @@ def rerank(
     ``jev+local``, ``local-only`` or ``none``. An empty ``dropped_injection_ids`` means
     "checked and clean" only under ``jev+local``, and only for ids outside ``unjudged_ids``.
     """
+    relevance_threshold, injection_threshold = _resolve_thresholds(relevance_threshold, injection_threshold)
     items = list(candidates)
     ids = [str(item["id"]) for item in items]
     texts = [str(item.get("text") or "") for item in items]
