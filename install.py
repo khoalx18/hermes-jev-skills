@@ -54,7 +54,14 @@ def _link(target: Path, link: Path) -> None:
         link.unlink()
     elif link.is_dir():
         shutil.rmtree(link)
-    link.symlink_to(target)
+    try:
+        link.symlink_to(target)
+    except OSError:
+        # Windows without Developer Mode / privilege: fall back to copy
+        if target.is_dir():
+            shutil.copytree(target, link, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"))
+        else:
+            shutil.copy2(target, link)
 
 
 def _remove(path: Path) -> bool:
