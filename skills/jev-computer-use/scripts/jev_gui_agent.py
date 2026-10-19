@@ -128,6 +128,16 @@ INTERACTIVE_ROLES = {
     "AXTab", "AXSlider", "AXDisclosureTriangle", "AXSegmentedControl",
 }
 
+# Windows (UIA) roles as reported by cua-driver on Win32: plain names with no
+# AX prefix, and usually no actions list. Without this mapping every Windows
+# control is dropped at the filter in element_rows() and the loop observes
+# nothing. Verified live against Calculator (Button/Text/MenuItem roles).
+WIN_INTERACTIVE_ROLES = {
+    "Button", "CheckBox", "RadioButton", "ComboBox", "MenuItem",
+    "TabItem", "Slider", "Link", "Hyperlink", "ListItem", "TreeItem",
+    "Menu", "Edit", "SearchBox",
+}
+
 # The chooser contract caps a table at 32 candidates. build_table always appends these,
 # so the element budget is whatever is left. Stated here once rather than as a magic 26.
 STANDARD_ACTIONS = (
@@ -339,7 +349,8 @@ def element_rows(state: dict, max_regions: int, tokens: list[str] | None = None)
         role = el.get("role") or ""
         acts = el.get("actions") or []
         row = _row_of(el) if role == "AXStaticText" else None
-        if role not in INTERACTIVE_ROLES and "AXPress" not in acts and row is None:
+        if role not in INTERACTIVE_ROLES and role not in WIN_INTERACTIVE_ROLES \
+                and "AXPress" not in acts and row is None:
             continue
         selected = bool(el.get("selected"))
         if row is not None:
